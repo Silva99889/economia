@@ -1,0 +1,338 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { initializeApp } from 'firebaseapp';
+import { 
+  getFirestore, 
+  collection, 
+  doc, 
+  onSnapshot, 
+  setDoc, 
+  updateDoc, 
+  deleteDoc, 
+  query
+} from 'firebasefirestore';
+import { 
+  getAuth, 
+  signInAnonymously, 
+  signInWithCustomToken, 
+  onAuthStateChanged 
+} from 'firebaseauth';
+import { 
+  PlusCircle, 
+  Trash2, 
+  Wallet, 
+  Target, 
+  Calendar,
+  PieChart as PieChartIcon,
+  ChevronRight,
+  ChevronLeft,
+  AlertCircle,
+  RefreshCw,
+  UserPlus,
+  TrendingUp,
+  X
+} from 'lucide-react';
+import { 
+  PieChart, 
+  Pie, 
+  Cell, 
+  ResponsiveContainer, 
+  Tooltip
+} from 'recharts';
+
+ Configuração Firebase
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined'  __app_id  'finance-v4-final';
+
+const COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
+
+const App = () = {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [activePerson, setActivePerson] = useState('Eu');
+  const [people, setPeople] = useState(['Eu']);
+  
+  const [transactions, setTransactions] = useState([]);
+  const [debts, setDebts] = useState([]);
+  const [goals, setGoals] = useState([]);
+  const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
+  const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
+
+   1. Autenticação e Sincronização
+  useEffect(() = {
+    const initAuth = async () = {
+      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        await signInWithCustomToken(auth, __initial_auth_token);
+      } else {
+        await signInAnonymously(auth);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, (u) = {
+      setUser(u);
+      setLoading(false);
+    });
+    return () = unsubscribe();
+  }, []);
+
+  useEffect(() = {
+    if (!user) return;
+
+    const txCol = collection(db, 'artifacts', appId, 'public', 'data', 'transactions');
+    const debtCol = collection(db, 'artifacts', appId, 'public', 'data', 'debts');
+    const goalCol = collection(db, 'artifacts', appId, 'public', 'data', 'goals');
+    const peopleDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'config', 'people');
+
+    const unsubTx = onSnapshot(txCol, (snap) = setTransactions(snap.docs.map(d = ({ id d.id, ...d.data() }))));
+    const unsubDebts = onSnapshot(debtCol, (snap) = setDebts(snap.docs.map(d = ({ id d.id, ...d.data() }))));
+    const unsubGoals = onSnapshot(goalCol, (snap) = setGoals(snap.docs.map(d = ({ id d.id, ...d.data() }))));
+    const unsubPeople = onSnapshot(peopleDocRef, (snap) = {
+      if (snap.exists()) setPeople(snap.data().list  ['Eu']);
+      else setDoc(peopleDocRef, { list ['Eu'] });
+    });
+
+    return () = { unsubTx(); unsubDebts(); unsubGoals(); unsubPeople(); };
+  }, [user]);
+
+   Ações Firebase
+  const handleAddTransaction = async (e) = {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const id = Date.now().toString();
+    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', id), {
+      description f.get('description'),
+      amount parseFloat(f.get('amount')),
+      type f.get('type'),
+      category f.get('category'),
+      person activePerson,
+      month currentMonth,
+      year currentYear,
+      createdAt new Date().toISOString()
+    });
+    e.target.reset();
+  };
+
+  const handleAddGoal = async (e) = {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const id = Date.now().toString();
+    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'goals', id), {
+      target f.get('target'),
+      amount parseFloat(f.get('amount')),
+      deadline f.get('deadline'),
+      person activePerson
+    });
+    e.target.reset();
+  };
+
+  const deleteItem = async (colName, id) = {
+    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', colName, id));
+  };
+
+   Cálculos
+  const formatCurrency = (v) = new Intl.NumberFormat('pt-BR', { style 'currency', currency 'BRL' }).format(v);
+  const months = [Janeiro, Fevereiro, Março, Abril, Maio, Junho, Julho, Agosto, Setembro, Outubro, Novembro, Dezembro];
+
+  const filtered = useMemo(() = transactions.filter(t = t.person === activePerson && t.month === currentMonth && t.year === currentYear), [transactions, activePerson, currentMonth, currentYear]);
+  
+  const totals = useMemo(() = {
+    const inc = filtered.filter(t = t.type === 'receita').reduce((a, b) = a + b.amount, 0);
+    const exp = filtered.filter(t = t.type === 'despesa').reduce((a, b) = a + b.amount, 0);
+    return { inc, exp, bal inc - exp };
+  }, [filtered]);
+
+  const catData = useMemo(() = {
+    const cats = {};
+    filtered.filter(t = t.type === 'despesa').forEach(t = { cats[t.category] = (cats[t.category]  0) + t.amount; });
+    return Object.entries(cats).map(([name, value]) = ({ name, value }));
+  }, [filtered]);
+
+  if (loading) return div className=h-screen flex flex-col items-center justify-center bg-slate-50RefreshCw className=animate-spin text-blue-600 mb-4 size={40} p className=font-bold text-slate-400SINCRONIZANDO...pdiv;
+
+  return (
+    div className=min-h-screen bg-slate-50 p-4 mdp-8 text-slate-900 font-sans
+      { Top Bar }
+      header className=max-w-7xl mx-auto mb-10 flex flex-col mdflex-row items-center justify-between gap-6
+        div className=flex items-center gap-3
+          div className=bg-indigo-600 p-3 rounded-2xl shadow-xl shadow-indigo-100 text-whiteTrendingUp size={24} div
+          h1 className=text-xl font-black uppercase tracking-tight italicCloud span className=text-indigo-600 font-blackFinancespanh1
+        div
+
+        div className=flex items-center gap-2 bg-white p-2 rounded-2xl shadow-sm border border-slate-100
+          {people.map(p = (
+            button key={p} onClick={() = setActivePerson(p)} className={`px-5 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${activePerson === p  'bg-indigo-600 text-white shadow-lg shadow-indigo-200'  'text-slate-400 hoverbg-slate-50'}`}
+              {p}
+            button
+          ))}
+          button onClick={async () = {
+            const n = prompt(Nome da nova pessoa);
+            if(n && !people.includes(n)) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'people'), { list [...people, n] });
+          }} className=p-2 text-indigo-600 hoverbg-indigo-50 rounded-xl transition-colors border border-dashed border-indigo-200 ml-2
+            UserPlus size={18} 
+          button
+        div
+      header
+
+      { Meses }
+      div className=max-w-7xl mx-auto mb-10 flex items-center justify-center gap-10 bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-50
+        button onClick={() = currentMonth === 0  (setCurrentMonth(11), setCurrentYear(currentYear-1))  setCurrentMonth(currentMonth-1)} className=p-3 bg-slate-50 rounded-full hoverbg-indigo-50 text-indigo-600 transition-allChevronLeft button
+        div className=text-lg font-black uppercase tracking-[0.2em] text-slate-700 flex items-center gap-3Calendar size={20} className=text-indigo-600  {months[currentMonth]} {currentYear}div
+        button onClick={() = currentMonth === 11  (setCurrentMonth(0), setCurrentYear(currentYear+1))  setCurrentMonth(currentMonth+1)} className=p-3 bg-slate-50 rounded-full hoverbg-indigo-50 text-indigo-600 transition-allChevronRight button
+      div
+
+      main className=max-w-7xl mx-auto grid grid-cols-1 lggrid-cols-12 gap-8
+        { Esquerda - Dashboard }
+        div className=lgcol-span-8 space-y-8
+          
+          div className=grid grid-cols-1 mdgrid-cols-3 gap-6
+            div className=bg-white p-8 rounded-[2rem] shadow-sm border-b-8 border-emerald-500
+              span className=text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2Entradasspan
+              p className=text-3xl font-black text-emerald-600{formatCurrency(totals.inc)}p
+            div
+            div className=bg-white p-8 rounded-[2rem] shadow-sm border-b-8 border-rose-500
+              span className=text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2Saídasspan
+              p className=text-3xl font-black text-rose-600{formatCurrency(totals.exp)}p
+            div
+            div className=bg-indigo-900 p-8 rounded-[2rem] shadow-2xl text-white
+              span className=text-[10px] font-black text-indigo-300 uppercase tracking-widest block mb-2Saldo Totalspan
+              p className=text-3xl font-black{formatCurrency(totals.bal)}p
+            div
+          div
+
+          div className=grid grid-cols-1 mdgrid-cols-2 gap-8
+            div className=bg-white p-8 rounded-[2.5rem] shadow-sm
+              h3 className=font-black text-xs uppercase tracking-widest text-slate-400 mb-8 flex items-center gap-2PieChartIcon size={16} className=text-indigo-500 Gastos por Categoriah3
+              div className=h-64
+                {catData.length  0  (
+                  ResponsiveContainer width=100% height=100%
+                    PieChart
+                      Pie data={catData} innerRadius={60} outerRadius={85} paddingAngle={8} dataKey=value
+                        {catData.map((_, i) = Cell key={i} fill={COLORS[i % COLORS.length]} )}
+                      Pie
+                      Tooltip formatter={(v) = formatCurrency(v)} 
+                    PieChart
+                  ResponsiveContainer
+                )  div className=h-full flex items-center justify-center text-xs font-black text-slate-300 uppercase italicAguardando dados...div}
+              div
+            div
+
+            { Visualização de Metas }
+            div className=bg-white p-8 rounded-[2.5rem] shadow-sm
+              h3 className=font-black text-xs uppercase tracking-widest text-slate-400 mb-8 flex items-center gap-2Target size={16} className=text-purple-500 Progresso de Metash3
+              div className=space-y-6 overflow-y-auto max-h-64 pr-2
+                {goals.filter(g = g.person === activePerson).map(g = {
+                  const progress = Math.min(100, Math.max(0, (totals.bal  g.amount)  100));
+                  return (
+                    div key={g.id} className=relative group
+                      div className=flex justify-between font-black text-[10px] uppercase mb-2
+                        span className=text-slate-700{g.target}span
+                        span className=text-slate-400{formatCurrency(g.amount)}span
+                      div
+                      div className=w-full bg-slate-100 h-3 rounded-full overflow-hidden
+                        div className=bg-indigo-600 h-full transition-all duration-1000 style={{ width `${progress}%` }} 
+                      div
+                      div className=flex justify-between mt-1 items-center
+                        span className=text-[9px] font-bold text-indigo-400{progress.toFixed(1)}% Completospan
+                        button onClick={() = deleteItem('goals', g.id)} className=text-slate-300 hovertext-rose-500 transition-colorsX size={12}button
+                      div
+                    div
+                  );
+                })}
+              div
+            div
+          div
+
+          { Extrato }
+          div className=bg-white rounded-[2.5rem] shadow-sm overflow-hidden border border-slate-50
+            div className=p-8 border-b border-slate-50 bg-slate-5020 font-black uppercase text-xs tracking-widest text-slate-600Movimentações de {months[currentMonth]}div
+            table className=w-full
+              thead className=text-left text-[10px] font-black uppercase text-slate-300 border-b border-slate-50
+                trth className=px-8 py-5Descriçãothth className=px-8 py-5Categoriathth className=px-8 py-5Valorthth className=px-8 py-5 text-rightAçãothtr
+              thead
+              tbody className=divide-y divide-slate-50
+                {filtered.map(t = (
+                  tr key={t.id} className=hoverbg-slate-5050
+                    td className=px-8 py-5 text-sm font-bold{t.description}td
+                    td className=px-8 py-5span className=text-[10px] font-black bg-slate-100 px-2 py-1 rounded-md text-slate-400 uppercase{t.category}spantd
+                    td className={`px-8 py-5 text-sm font-black ${t.type === 'receita'  'text-emerald-500'  'text-rose-500'}`}{t.type === 'receita'  '+'  '-'} {formatCurrency(t.amount)}td
+                    td className=px-8 py-5 text-rightbutton onClick={() = deleteItem('transactions', t.id)} className=text-slate-200 hovertext-rose-500Trash2 size={16}buttontd
+                  tr
+                ))}
+              tbody
+            table
+          div
+        div
+
+        { Direita - Formulários }
+        div className=lgcol-span-4 space-y-8
+          
+          div className=bg-white p-8 rounded-[2.5rem] shadow-sm
+            h3 className=font-black text-xs uppercase tracking-widest text-indigo-600 mb-6Novo Lançamentoh3
+            form onSubmit={handleAddTransaction} className=space-y-4
+              input name=description placeholder=Ex Salário, Netflix required className=w-full p-4 bg-slate-50 border-none rounded-2xl text-sm font-bold 
+              div className=grid grid-cols-2 gap-3
+                input name=amount type=number step=0.01 placeholder=Valor required className=p-4 bg-slate-50 border-none rounded-2xl text-sm font-black 
+                select name=type className=p-4 bg-slate-50 border-none rounded-2xl text-[10px] font-black uppercase text-slate-400
+                  option value=despesaSaídaoptionoption value=receitaEntradaoption
+                select
+              div
+              select name=category className=w-full p-4 bg-slate-50 border-none rounded-2xl text-[10px] font-black uppercase text-slate-400
+                option value=Essencial🏠 Essencialoptionoption value=Estilo de Vida🎮 Estilo de Vidaoptionoption value=Investimentos📈 Investimentosoption
+                option value=Saúde🏥 Saúdeoptionoption value=Transporte🚗 Transporteoption
+              select
+              button className=w-full py-5 bg-indigo-600 text-white font-black uppercase text-xs tracking-widest rounded-2xl shadow-xl shadow-indigo-100 hoverbg-indigo-700Lançarbutton
+            form
+          div
+
+          { Inserção de Metas }
+          div className=bg-slate-900 p-8 rounded-[2.5rem] text-white shadow-2xl
+            h3 className=font-black text-xs uppercase tracking-widest text-indigo-400 mb-6Definir Novo Objetivoh3
+            form onSubmit={handleAddGoal} className=space-y-4
+              input name=target placeholder=Ex Comprar Portátil required className=w-full p-4 bg-white10 border-none rounded-2xl text-sm font-bold text-white placeholdertext-white20 
+              input name=amount type=number step=0.01 placeholder=Valor Alvo (R$) required className=w-full p-4 bg-white10 border-none rounded-2xl text-sm font-black text-white 
+              div className=space-y-1
+                label className=text-[9px] font-black uppercase text-white40 ml-2Prazo Finallabel
+                input name=deadline type=date required className=w-full p-4 bg-white10 border-none rounded-2xl text-sm font-bold text-white 
+              div
+              button className=w-full py-5 bg-indigo-500 text-white font-black uppercase text-xs tracking-widest rounded-2xl hoverbg-indigo-600 transition-allCriar Metabutton
+            form
+          div
+
+          div className=bg-white p-8 rounded-[2.5rem] shadow-sm
+            h3 className=font-black text-xs uppercase tracking-widest text-rose-500 mb-6Controle de Dívidash3
+            div className=space-y-4
+              {debts.filter(d = d.person === activePerson).map(d = (
+                div key={d.id} className=p-4 bg-rose-50 rounded-2xl border border-rose-100
+                  div className=flex justify-between text-[10px] font-black uppercase mb-2span{d.name}spanspan className=text-rose-500{Math.round((d.paidd.total)100)}%spandiv
+                  div className=w-full bg-rose-200 h-1.5 rounded-full overflow-hidden mb-3div className=bg-rose-500 h-full style={{ width `${(d.paidd.total)100}%` }} div
+                  div className=flex gap-2
+                    button onClick={async () = {
+                      const v = prompt(Quanto pagou);
+                      if(v) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'debts', d.id), { paid Math.min(d.total, d.paid + parseFloat(v)) });
+                    }} className=flex-1 py-2 bg-white text-rose-500 border border-rose-100 rounded-xl font-black text-[10px] uppercasePagarbutton
+                    button onClick={() = deleteItem('debts', d.id)} className=p-2 text-rose-300 hovertext-rose-600X size={14}button
+                  div
+                div
+              ))}
+            div
+            form onSubmit={async (e) = {
+              e.preventDefault();
+              const f = new FormData(e.target);
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'debts', Date.now().toString()), { name f.get('name'), total parseFloat(f.get('total')), paid 0, person activePerson });
+              e.target.reset();
+            }} className=mt-6 pt-6 border-t border-slate-50 space-y-2
+              input name=name placeholder=Nome da Dívida required className=w-full p-3 bg-slate-50 border-none rounded-xl text-xs font-bold 
+              input name=total type=number placeholder=Valor Total required className=w-full p-3 bg-slate-50 border-none rounded-xl text-xs font-bold 
+              button className=w-full py-3 bg-slate-800 text-white font-black uppercase text-[10px] rounded-xl hoverbg-black transition-colorsRegistar Dívidabutton
+            form
+          div
+
+        div
+      main
+    div
+  );
+};
+
+export default App;
